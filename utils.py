@@ -1,5 +1,7 @@
 from prettytable import PrettyTable
 import time
+import torch
+from torch.utils.data.dataset import Dataset
 
 
 def layer_wise_parameters(model):
@@ -78,3 +80,25 @@ class Timer(object):
         if self.running:
             return self.total + time.time() - self.start
         return self.total
+
+
+class TextDataset(Dataset):
+    def __init__(self, datas, vocab, device, is_test=False):
+        self.is_test = is_test
+        if not is_test:
+            self.labels = torch.tensor(
+                list(map(lambda x: int(x) - 1, datas.label_id))).to(device)
+        self.features = torch.tensor(list(map(
+            lambda sentence: list(map(
+                lambda token: vocab.stoi[token], sentence)),
+            datas.text
+        ))).to(device)
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, index):
+        if self.is_test:
+            return self.features[index]
+        else:
+            return self.labels[index], self.features[index]

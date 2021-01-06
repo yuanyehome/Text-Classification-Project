@@ -11,10 +11,12 @@ class RnnModel(nn.Module):
                  bidirectional: bool, RNN_nonlinear_type=None, pretrained_embedding=None):
         super(RnnModel, self).__init__()
 
-        self.embedder = nn.Embedding(num_words, input_size)
         if pretrained_embedding is not None:
             logger.info("Init embedder parameters with pretrained embedding.")
-            self.embedder.weight.data.copy_(pretrained_embedding)
+            self.embedder = nn.Embedding.from_pretrained(
+                pretrained_embedding, freeze=False)
+        else:
+            self.embedder = nn.Embedding(num_words, input_size)
 
         assert model_type in ["RNN", "GRU", "LSTM"]
         if model_type == "RNN":

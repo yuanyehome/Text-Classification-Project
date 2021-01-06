@@ -1,0 +1,12 @@
+# Temp notes of project
+- Use https://pytorch.org/docs/stable/generated/torch.nn.utils.rnn.pack_padded_sequence.html#torch.nn.utils.rnn.pack_padded_sequence to do batch-wise padding or not?
+- Use pre-trained glove or word2vec embeddings?
+- Use pre-trained RoBERTa?
+  - Static
+  - Fine-tuning
+- RNN type?
+- RNN number layers?
+- Nonlinearity of RNN?
+- Avarage?
+- Character-level?
+- Padding len? Statistics of dataset.

@@ -31,7 +31,20 @@ def tokenizer(text):  # create a tokenizer function
 
 
 def process_args(in_args):
+    if not os.path.exists(in_args.output_path):
+        os.system("mkdir -p %s" % in_args.output_path)
+    output_path = os.path.join(in_args.output_path, "run_%s" % args.model_name)
+    max_num = -1
+    for folder in os.listdir(in_args.output_path):
+        if ("run_" + args.model_name) in folder:
+            curr_num = int(folder.split('_')[-1])
+            if curr_num > max_num:
+                max_num = curr_num
+    output_path += '_%d' % (max_num + 1)
+    in_args.output_path = output_path
+    assert not os.path.exists(in_args.output_path)
     os.system("mkdir -p %s" % in_args.output_path)
+
     if in_args.test_only:
         in_args.log_path = os.path.join(in_args.output_path, "test_log.txt")
     else:
@@ -290,8 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_file", default="train.csv")
     parser.add_argument("--dev_file", default="dev.csv")
     parser.add_argument("--test_file", default="test.csv")
-    parser.add_argument("--output_path", required=True,
-                        help="Output folder.")
+    parser.add_argument("--output_path", default="runs")
     parser.add_argument("--model_name", required=True,
                         help="Model name for saving.")
     parser.add_argument("--train_batch_size", type=int, default=128)

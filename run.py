@@ -1,4 +1,5 @@
 from numpy.core.fromnumeric import mean
+from numpy.lib.function_base import average
 from torch.utils.data.dataloader import DataLoader
 from models import RnnModel, TextCNN
 import torch
@@ -17,6 +18,8 @@ from utils import AverageMeter, TextDataset, count_parameters, layer_wise_parame
 import torch.optim as optim
 import torch.cuda
 import nltk
+from sklearn.metrics import precision_score, recall_score, f1_score
+import pandas as pd
 
 
 spacy_en = spacy.load("en_core_web_lg")
@@ -28,7 +31,11 @@ def tokenizer(text):  # create a tokenizer function
 
 def process_args(in_args):
     os.system("mkdir -p %s" % in_args.output_path)
-    in_args.log_path = os.path.join(in_args.output_path, "training_log.txt")
+    if in_args.test_only:
+        in_args.log_path = os.path.join(in_args.output_path, "test_log.txt")
+    else:
+        in_args.log_path = os.path.join(
+            in_args.output_path, "training_log.txt")
     if os.path.isfile(os.path.join(in_args.output_path, in_args.model_name)):
         in_args.checkpoint = os.path.join(in_args.output_path,
                                           in_args.model_name)
@@ -45,23 +52,77 @@ def do_validation(model: nn.Module, val_iter):
     model.eval()
     total = 0
     correct = 0
+
+    all_predictions = []
+    all_labels = []
+
     for batch in tqdm(val_iter, desc="Validating"):
         labels = batch.label_id  # [batch_size]
         texts = batch.text  # [text_len, batch_size]
 
         output = model(texts)
         predictions = torch.argmax(output, dim=1) + 1
+        all_predictions += predictions.tolist()
+        all_labels += labels.tolist()
         correct_num = torch.sum(predictions == labels).item()
 
         total += len(batch)
         correct += correct_num
+
+    all_predictions = np.array(all_predictions)
+    all_labels = np.array(all_labels)
+    precision = precision_score(all_labels, all_predictions, average="macro")
+    recall = recall_score(all_labels, all_predictions, average="macro")
+    F1 = f1_score(all_labels, all_predictions, average="macro")
     logger.info("Validation: total %d items; %d are correct." %
                 (total, correct))
-    return correct / total
+    return correct / total, precision, recall, F1
 
 
-def predict_test(test_iter):
-    pass
+@torch.no_grad()
+def predict_test():
+    saved_file = torch.load(os.path.join(
+        args.output_path,
+        "best_%s_model.pkl" % args.model_name
+    ))
+    TEXT = saved_file["vocab"]
+    test = data.TabularDataset(os.path.join(args.data_path, args.test_file), format='csv', skip_header=True,
+                               fields=[('label_id', None), ('text', TEXT)])
+    test_lens = list(map(lambda x: len(x), test.text))
+    logger.info("Max Length: %d - Avg Length: %d" % (
+        max(test_lens), mean(test_lens)
+    ))
+    for test_item in test:
+        test_item.text = test_item.text[:args.max_len]
+    test_iter = data.Iterator(dataset=test, batch_size=args.test_batch_size,
+                              train=False, sort=False, device=DEVICE)
+    if args.model_name in ["LSTM", "RNN", "GRU"]:
+        model = RnnModel(logger=logger, num_words=len(TEXT.vocab),
+                         pretrained_embedding=TEXT.vocab.vectors,
+                         num_layers=args.num_layers,
+                         model_type=args.model_name, input_size=300, hidden_size=args.hidden_size,
+                         dropout=args.dropout, num_classes=4,
+                         bidirectional=args.bidirectional, RNN_nonlinear_type=args.RNN_nonlinear_type)
+    elif args.model_name == "CNN":
+        model = TextCNN(logger=logger, num_words=len(TEXT.vocab),
+                        pretrained_embedding=TEXT.vocab.vectors,
+                        input_size=300, num_classes=4)
+    else:
+        raise ValueError("Unsupported model.")
+    model.load_state_dict(saved_file["model"])
+    model = model.to(DEVICE)
+    all_predictions = []
+    model.eval()
+    for batch in tqdm(test_iter, desc="Generating"):
+        texts = batch.text  # [text_len, batch_size]
+
+        output = model(texts)
+        predictions = torch.argmax(output, dim=1) + 1
+        all_predictions += predictions.tolist()
+    test_data = pd.read_csv('data/test.csv')
+    test_data["Class Index"] = pd.Series(all_predictions)
+    test_data.to_csv(os.path.join(args.output_path, 'prediction.csv'),
+                     index=False)
 
 
 def padding(text, length):
@@ -77,8 +138,6 @@ def main():
         format='csv', skip_header=True,
         fields=[('label_id', LABEL), ('text', TEXT)]
     )
-    test = data.TabularDataset(os.path.join(args.data_path, args.test_file), format='csv', skip_header=True,
-                               fields=[('label_id', None), ('text', TEXT)])
     logger.info("Done.")
 
     # for train_item in train:
@@ -92,16 +151,13 @@ def main():
         train_item.text = train_item.text[:args.max_len]
     for val_item in val:
         val_item.text = val_item.text[:args.max_len]
-    for test_item in test:
-        test_item.text = test_item.text[:args.max_len]
 
     train_lens = list(map(lambda x: len(x), train.text))
     val_lens = list(map(lambda x: len(x), val.text))
-    test_lens = list(map(lambda x: len(x), test.text))
-    logger.info("Max Length:\n\tTrain: %d\n\tVal: %d\n\tTest: %d\n"
-                "Avg Length:\n\tTrain: %d\n\tVal: %d\n\tTest: %d" % (
-                    max(train_lens), max(val_lens), max(test_lens),
-                    mean(train_lens), mean(val_lens), mean(test_lens)
+    logger.info("Max Length:\n\tTrain: %d\n\tVal: %d\n"
+                "Avg Length:\n\tTrain: %d\n\tVal: %d" % (
+                    max(train_lens), max(val_lens),
+                    mean(train_lens), mean(val_lens)
                 ))
 
     all_labels = np.unique(list(map(lambda x: int(x), train.label_id)))
@@ -126,8 +182,6 @@ def main():
     val_iter = data.BucketIterator(val, batch_size=args.test_batch_size,
                                    sort_key=lambda x: len(x.text),
                                    shuffle=True, device=DEVICE)
-    test_iter = data.Iterator(dataset=test, batch_size=args.test_batch_size,
-                              train=False, sort=False, device=DEVICE)
 
     # train_loader = DataLoader(TextDataset(
     #     train, TEXT.vocab, DEVICE), batch_size=args.train_batch_size, shuffle=True
@@ -155,8 +209,8 @@ def main():
     if args.gpu:
         model = model.cuda()
 
-    optimizer = optim.Adam(model.parameters(),
-                           lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    sheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.1)
     criterion = nn.CrossEntropyLoss()
 
     table = layer_wise_parameters(model)
@@ -195,22 +249,24 @@ def main():
             loss_avg.update(loss.item())
             pbar.set_description("Epoch %d - Batch %d - Loss %.3f"
                                  % (epoch, batch_idx, loss.item()))
+        sheduler.step()
         logger.info("Training: total %d items; %d are correct. Accuracy: %.3f" %
                     (total, correct, correct / total))
-        curr_val_score = do_validation(model, val_iter)
-        logger.info("Epoch %d ends! Average loss: %.3f. Validation accuracy: %.2f%%" %
-                    (epoch, loss_avg.avg, curr_val_score * 100))
+        curr_val_score, precision, recall, F1 = do_validation(model, val_iter)
+        logger.info("Epoch %d ends! Average loss: %.3f.\nValidation metrics:\n\t"
+                    "Accuracy: %.2f%%\n\tPrecision: %.2f\n\tRecall: %.2f\n\tF1: %.2f" %
+                    (epoch, loss_avg.avg, curr_val_score * 100, precision, recall, F1))
         if curr_val_score > best_val_score:
             best_epoch = epoch
             best_val_score = curr_val_score
             logger.info("Best accuracy is %.2f%% in epoch %d. Saving model..." % (
                 curr_val_score * 100, epoch))
             torch.save({
-                "model": model.state_dict()
+                "model": model.state_dict(),
+                "vocab": TEXT
             }, os.path.join(args.output_path, "best_%s_model.pkl" % args.model_name))
-    logger.info("The best model is in epoch %d, the best score is %.3f" %
-                (best_epoch, best_val_score))
-    predict_test(test_iter)
+    logger.info("The best model is in epoch %d, the best score is %.3f%%" %
+                (best_epoch, best_val_score * 100))
 
 
 if __name__ == "__main__":
@@ -234,6 +290,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--vocab_size", type=int, default=-1)
     parser.add_argument("--max_len", type=int, required=True)
+    parser.add_argument("--test_only", action="store_true")
     args = parser.parse_args()
     process_args(args)
     assert args.model_name in ["LSTM", "RNN", "GRU", "CNN"]
@@ -261,4 +318,8 @@ if __name__ == "__main__":
     logger.info('CONFIG:\n%s' % json.dumps(
         vars(args), indent=4, sort_keys=True))
 
-    main()
+    if args.test_only:
+        logger.info("Do prediction only.")
+        predict_test()
+    else:
+        main()

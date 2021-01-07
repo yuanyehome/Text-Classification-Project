@@ -5,3 +5,5 @@ merged_data/
 .vector_cache/
 runs/
 **/__pycache__/**
+cmp_test.csv
+cmp.ipynb

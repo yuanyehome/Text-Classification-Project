@@ -1,5 +1,6 @@
 from numpy.core.fromnumeric import mean
 from numpy.lib.function_base import average
+from torch._C import Value
 from torch.utils.data.dataloader import DataLoader
 from models import RnnModel, TextCNN
 import torch
@@ -94,6 +95,8 @@ def predict_test():
     ))
     for test_item in test:
         test_item.text = test_item.text[:args.max_len]
+        if args.full_padding:
+            test_item.text = padding(test_item.text, args.max_len)
     test_iter = data.Iterator(dataset=test, batch_size=args.test_batch_size,
                               train=False, sort=False, device=DEVICE)
     if args.model_name in ["LSTM", "RNN", "GRU"]:
@@ -144,13 +147,15 @@ def main():
     #     train_item.text = padding(train_item.text[:args.max_len], args.max_len)
     # for val_item in val:
     #     val_item.text = padding(val_item.text[:args.max_len], args.max_len)
-    # for test_item in test:
-    #     test_item.text = padding(test_item.text[:args.max_len], args.max_len)
 
     for train_item in train:
         train_item.text = train_item.text[:args.max_len]
+        if args.full_padding:
+            train_item.text = padding(train_item.text, args.max_len)
     for val_item in val:
         val_item.text = val_item.text[:args.max_len]
+        if args.full_padding:
+            val_item.text = padding(val_item.text, args.max_len)
 
     train_lens = list(map(lambda x: len(x), train.text))
     val_lens = list(map(lambda x: len(x), val.text))
@@ -202,6 +207,7 @@ def main():
                          bidirectional=args.bidirectional, RNN_nonlinear_type=args.RNN_nonlinear_type)
     elif args.model_name == "CNN":
         model = TextCNN(logger=logger, num_words=vocab_size,
+                        kernel_nums=args.kernel_num, kernel_sizes=args.kernel_size,
                         pretrained_embedding=TEXT.vocab.vectors,
                         input_size=300, num_classes=num_classes)
     else:
@@ -209,8 +215,17 @@ def main():
     if args.gpu:
         model = model.cuda()
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
-    sheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.1)
+    if args.optimizer == "Adam":
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    elif args.optimizer == "SGD":
+        optimizer = optim.SGD(model.parameters(),
+                              lr=args.lr, momentum=args.momentum)
+    elif args.optimizer == "AdamW":
+        optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    else:
+        raise ValueError("Unsupported optimizer type.")
+    sheduler = optim.lr_scheduler.ExponentialLR(
+        optimizer, args.lr_step, verbose=True)
     criterion = nn.CrossEntropyLoss()
 
     table = layer_wise_parameters(model)
@@ -291,9 +306,19 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_size", type=int, default=-1)
     parser.add_argument("--max_len", type=int, required=True)
     parser.add_argument("--test_only", action="store_true")
+    parser.add_argument("--lr_step", type=float, default=0.1)
+    parser.add_argument("--kernel_size", type=int,
+                        nargs='+', default=[2, 3, 4])
+    parser.add_argument("--kernel_num", type=int,
+                        nargs="+", default=[256, 256, 256])
+    parser.add_argument("--optimizer", type=str, default="Adam")
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--full_padding", action="store_true")
     args = parser.parse_args()
     process_args(args)
     assert args.model_name in ["LSTM", "RNN", "GRU", "CNN"]
+    assert len(args.kernel_num) == len(args.kernel_size)
+    assert args.optimizer in ["SGD", "Adam", "AdamW"]
 
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     LABEL = data.Field(sequential=False, use_vocab=False, is_target=True)

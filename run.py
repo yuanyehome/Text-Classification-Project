@@ -75,8 +75,12 @@ def do_validation(model: nn.Module, val_loader: DataLoader):
     for batch in tqdm(val_loader, desc="Validating"):
         labels = batch[0]  # [batch_size]
         texts = batch[1].t()  # [text_len, batch_size]
+        lengths = batch[2]  # [batch_size]
 
-        output = model(texts)
+        if args.model_name == "CNN":
+            output = model(texts)
+        else:
+            output = model(texts, lengths)
         predictions = torch.argmax(output, dim=1)
         all_predictions += predictions.tolist()
         all_labels += labels.tolist()
@@ -137,8 +141,12 @@ def predict_test():
     model.eval()
     for batch in tqdm(test_loader, desc="Generating"):
         texts = batch[0].t()  # [text_len, batch_size]
+        lengths = batch[1]  # [batch_size]
 
-        output = model(texts)
+        if args.model_name == "CNN":
+            output = model(texts)
+        else:
+            output = model(texts, lengths)
         predictions = torch.argmax(output, dim=1) + 1
         all_predictions += predictions.tolist()
     test_data = pd.read_csv('data/test.csv')
@@ -266,9 +274,13 @@ def main():
         for batch_idx, batch in enumerate(pbar):
             labels = batch[0]  # [batch_size]
             texts = batch[1].t()  # [text_len, batch_size]
+            lengths = batch[2]
             optimizer.zero_grad()
 
-            out = model(texts)
+            if args.model_name == "CNN":
+                out = model(texts)
+            else:
+                out = model(texts, lengths)
             loss = criterion(out, labels)
             loss.backward()
             optimizer.step()

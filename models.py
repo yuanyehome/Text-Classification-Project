@@ -2,7 +2,7 @@ from logging import Logger
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import init
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 
 class RnnModel(nn.Module):
@@ -57,13 +57,24 @@ class RnnModel(nn.Module):
             nn.ReLU(), nn.Linear(hidden_size, num_classes)
         )
 
-    def forward(self, features: torch.tensor):
+    def forward(self, features: torch.tensor, lengths: torch.tensor):
         """
         features: [seq_len, batch_size]
         """
         features = self.embedder(features)  # [seq_len, batch_size, input_size]
-        output, _ = self.rnn_model(features)
-        output = output[-1, :, :]  # [batch_size,(1+bidirectional)*hidden_size]
+        packed = pack_padded_sequence(
+            features, lengths, batch_first=False, enforce_sorted=False
+        )
+        output, _ = self.rnn_model(packed)
+        output, unpacked_lens = pad_packed_sequence(output, batch_first=False)
+        assert all(unpacked_lens == lengths)
+        # [batch_size,(1+bidirectional)*hidden_size]
+        batch_idxs = torch.arange(0, features.size(1)).long()
+        len_idxs = lengths - 1
+        if lengths.is_cuda:
+            len_idxs.cuda()
+            batch_idxs.cuda()
+        output = output[len_idxs, batch_idxs, :]
         return self.output_layer(output)  # [batch_size, num_classes]
 
 

@@ -8,3 +8,5 @@ runs/
 cmp_test.csv
 cmp.ipynb
 res.txt
+scripts/
+*_runs/

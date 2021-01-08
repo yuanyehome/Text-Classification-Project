@@ -31,19 +31,21 @@ def tokenizer(text):  # create a tokenizer function
 
 
 def process_args(in_args):
-    if not os.path.exists(in_args.output_path):
+    if not args.test_only:
+        if not os.path.exists(in_args.output_path):
+            os.system("mkdir -p %s" % in_args.output_path)
+        output_path = os.path.join(
+            in_args.output_path, "run_%s" % args.model_name)
+        max_num = -1
+        for folder in os.listdir(in_args.output_path):
+            if ("run_" + args.model_name) in folder:
+                curr_num = int(folder.split('_')[-1])
+                if curr_num > max_num:
+                    max_num = curr_num
+        output_path += '_%d' % (max_num + 1)
+        in_args.output_path = output_path
+        assert not os.path.exists(in_args.output_path)
         os.system("mkdir -p %s" % in_args.output_path)
-    output_path = os.path.join(in_args.output_path, "run_%s" % args.model_name)
-    max_num = -1
-    for folder in os.listdir(in_args.output_path):
-        if ("run_" + args.model_name) in folder:
-            curr_num = int(folder.split('_')[-1])
-            if curr_num > max_num:
-                max_num = curr_num
-    output_path += '_%d' % (max_num + 1)
-    in_args.output_path = output_path
-    assert not os.path.exists(in_args.output_path)
-    os.system("mkdir -p %s" % in_args.output_path)
 
     if in_args.test_only:
         in_args.log_path = os.path.join(in_args.output_path, "test_log.txt")
@@ -190,7 +192,7 @@ def main():
                 (example_id, train[example_id].label_id, train[example_id].text))
     TEXT.build_vocab(train, vectors='glove.840B.300d',
                      max_size=args.vocab_size if args.vocab_size > 0 else None,
-                     min_freq=10)
+                     min_freq=args.min_freq)
     logger.info("Vocab size: %d" % len(TEXT.vocab))
     vocab_size = len(TEXT.vocab)
 
@@ -303,6 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_file", default="train.csv")
     parser.add_argument("--dev_file", default="dev.csv")
     parser.add_argument("--test_file", default="test.csv")
+    parser.add_argument("--test_run", type=str)
     parser.add_argument("--output_path", default="runs")
     parser.add_argument("--model_name", required=True,
                         help="Model name for saving.")
@@ -315,7 +318,9 @@ if __name__ == "__main__":
     parser.add_argument("--bidirectional", action="store_true")
     parser.add_argument("--RNN_nonlinear_type", default="tanh")
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--tokenizer", type=str, default="nltk")
     parser.add_argument("--vocab_size", type=int, default=-1)
+    parser.add_argument("--min_freq", type=int, default=1)
     parser.add_argument("--max_len", type=int, required=True)
     parser.add_argument("--test_only", action="store_true")
     parser.add_argument("--lr_step", type=float, default=0.1)
@@ -331,10 +336,15 @@ if __name__ == "__main__":
     assert args.model_name in ["LSTM", "RNN", "GRU", "CNN"]
     assert len(args.kernel_num) == len(args.kernel_size)
     assert args.optimizer in ["SGD", "Adam", "AdamW"]
+    assert args.tokenizer in ["spacy", "nltk"]
 
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     LABEL = data.Field(sequential=False, use_vocab=False, is_target=True)
-    TEXT = data.Field(sequential=True, tokenize=nltk.word_tokenize, lower=True)
+    TEXT = data.Field(
+        sequential=True,
+        tokenize=tokenizer if args.tokenizer == "spacy" else nltk.word_tokenize,
+        lower=True
+    )
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)

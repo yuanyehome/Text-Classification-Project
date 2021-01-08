@@ -83,7 +83,7 @@ class Timer(object):
 
 
 class TextDataset(Dataset):
-    def __init__(self, datas, vocab, device, is_test=False):
+    def __init__(self, datas, vocab, device, lengths, is_test=False):
         self.is_test = is_test
         if not is_test:
             self.labels = torch.tensor(
@@ -93,12 +93,13 @@ class TextDataset(Dataset):
                 lambda token: vocab.stoi[token], sentence)),
             datas.text
         ))).to(device)
+        self.lengths = torch.tensor(lengths)
 
     def __len__(self):
         return len(self.features)
 
     def __getitem__(self, index):
         if self.is_test:
-            return (self.features[index],)
+            return (self.features[index], self.lengths[index])
         else:
-            return (self.labels[index], self.features[index])
+            return (self.labels[index], self.features[index], self.lengths[index])

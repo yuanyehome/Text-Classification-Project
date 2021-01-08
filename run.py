@@ -108,12 +108,14 @@ def predict_test():
     logger.info("Max Length: %d - Avg Length: %d" % (
         max(test_lens), mean(test_lens)
     ))
+    test_lengths = []
     for test_item in test:
-        test_item.text = test_item.text[:args.max_len]
-        if args.full_padding:
-            test_item.text = padding(test_item.text, args.max_len)
+        test_item.text, test_length = padding(
+            test_item.text[:args.max_len], args.max_len
+        )
+        test_lengths.append(test_length)
     test_loader = DataLoader(
-        TextDataset(test, TEXT.vocab, DEVICE, is_test=True),
+        TextDataset(test, TEXT.vocab, DEVICE, test_lengths, is_test=True),
         batch_size=args.test_batch_size, shuffle=False
     )
     if args.model_name in ["LSTM", "RNN", "GRU"]:
@@ -145,10 +147,11 @@ def predict_test():
                      index=False)
 
 
-def padding(text, length):
-    while len(text) < length:
+def padding(text, max_length):
+    length = len(text)
+    while len(text) < max_length:
         text.append("<pad>")
-    return text
+    return text, length
 
 
 def main():
@@ -160,14 +163,18 @@ def main():
     )
     logger.info("Done.")
 
+    train_lengths = []
+    val_lengths = []
     for train_item in train:
-        train_item.text = train_item.text[:args.max_len]
-        if args.full_padding:
-            train_item.text = padding(train_item.text, args.max_len)
+        train_item.text, train_length = padding(
+            train_item.text[:args.max_len], args.max_len
+        )
+        train_lengths.append(train_length)
     for val_item in val:
-        val_item.text = val_item.text[:args.max_len]
-        if args.full_padding:
-            val_item.text = padding(val_item.text, args.max_len)
+        val_item.text, val_length = padding(
+            val_item.text[:args.max_len], args.max_len
+        )
+        val_lengths.append(val_length)
 
     train_lens = list(map(lambda x: len(x), train.text))
     val_lens = list(map(lambda x: len(x), val.text))
@@ -201,17 +208,17 @@ def main():
     #                                shuffle=True, device=DEVICE)
 
     train_loader = DataLoader(
-        TextDataset(train, TEXT.vocab, DEVICE),
+        TextDataset(train, TEXT.vocab, DEVICE, train_lengths),
         batch_size=args.train_batch_size, shuffle=True
     )
     val_loader = DataLoader(
-        TextDataset(val, TEXT.vocab, DEVICE),
+        TextDataset(val, TEXT.vocab, DEVICE, val_lengths),
         batch_size=args.test_batch_size, shuffle=True
     )
 
     if args.model_name in ["LSTM", "RNN", "GRU"]:
         model = RnnModel(logger=logger, num_words=vocab_size,
-                         pretrained_embedding=TEXT.vocab.vectors,
+                         pretrained_embedding=TEXT.vocab.vectors if args.use_glove else None,
                          num_layers=args.num_layers,
                          model_type=args.model_name, input_size=300, hidden_size=args.hidden_size,
                          dropout=args.dropout, num_classes=num_classes,
@@ -219,7 +226,7 @@ def main():
     elif args.model_name == "CNN":
         model = TextCNN(logger=logger, num_words=vocab_size,
                         kernel_nums=args.kernel_num, kernel_sizes=args.kernel_size,
-                        pretrained_embedding=TEXT.vocab.vectors,
+                        pretrained_embedding=TEXT.vocab.vectors if args.use_glove else None,
                         input_size=300, num_classes=num_classes)
     else:
         raise ValueError("Unsupported model.")
@@ -326,7 +333,7 @@ if __name__ == "__main__":
                         nargs="+", default=[256, 256, 256])
     parser.add_argument("--optimizer", type=str, default="Adam")
     parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--full_padding", action="store_true")
+    parser.add_argument("--use_glove", action="store_true")
     args = parser.parse_args()
     process_args(args)
     assert args.model_name in ["LSTM", "RNN", "GRU", "CNN"]

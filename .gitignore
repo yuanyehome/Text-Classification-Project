@@ -7,3 +7,4 @@ runs/
 **/__pycache__/**
 cmp_test.csv
 cmp.ipynb
+res.txt

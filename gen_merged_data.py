@@ -13,7 +13,10 @@ for split in ["train", "test", "dev"]:
     descriptions = data["Description"]
     for label, title, description in zip(labels, titles, descriptions):
         title = title.replace('\\', ' ')
-        description = description.replace('\\', ' ')
+        description = description\
+            .replace('\\', ' ')\
+            .replace('#39;', '\'')\
+            .replace('#36;', '$')
         res["label"].append(label)
         res["title"].append(title)
         res["description"].append(description)

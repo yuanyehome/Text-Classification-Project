@@ -99,6 +99,6 @@ class TextDataset(Dataset):
 
     def __getitem__(self, index):
         if self.is_test:
-            return self.features[index]
+            return (self.features[index],)
         else:
-            return self.labels[index], self.features[index]
+            return (self.labels[index], self.features[index])

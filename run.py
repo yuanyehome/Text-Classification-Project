@@ -64,7 +64,7 @@ def process_args(in_args):
 
 
 @torch.no_grad()
-def do_validation(model: nn.Module, val_iter):
+def do_validation(model: nn.Module, val_loader: DataLoader):
     model.eval()
     total = 0
     correct = 0
@@ -72,17 +72,17 @@ def do_validation(model: nn.Module, val_iter):
     all_predictions = []
     all_labels = []
 
-    for batch in tqdm(val_iter, desc="Validating"):
-        labels = batch.label_id  # [batch_size]
-        texts = batch.text  # [text_len, batch_size]
+    for batch in tqdm(val_loader, desc="Validating"):
+        labels = batch[0]  # [batch_size]
+        texts = batch[1].t()  # [text_len, batch_size]
 
         output = model(texts)
-        predictions = torch.argmax(output, dim=1) + 1
+        predictions = torch.argmax(output, dim=1)
         all_predictions += predictions.tolist()
         all_labels += labels.tolist()
         correct_num = torch.sum(predictions == labels).item()
 
-        total += len(batch)
+        total += len(batch[0])
         correct += correct_num
 
     all_predictions = np.array(all_predictions)
@@ -112,8 +112,10 @@ def predict_test():
         test_item.text = test_item.text[:args.max_len]
         if args.full_padding:
             test_item.text = padding(test_item.text, args.max_len)
-    test_iter = data.Iterator(dataset=test, batch_size=args.test_batch_size,
-                              train=False, sort=False, device=DEVICE)
+    test_loader = DataLoader(
+        TextDataset(test, TEXT.vocab, DEVICE, is_test=True),
+        batch_size=args.test_batch_size, shuffle=False
+    )
     if args.model_name in ["LSTM", "RNN", "GRU"]:
         model = RnnModel(logger=logger, num_words=len(TEXT.vocab),
                          pretrained_embedding=TEXT.vocab.vectors,
@@ -131,8 +133,8 @@ def predict_test():
     model = model.to(DEVICE)
     all_predictions = []
     model.eval()
-    for batch in tqdm(test_iter, desc="Generating"):
-        texts = batch.text  # [text_len, batch_size]
+    for batch in tqdm(test_loader, desc="Generating"):
+        texts = batch[0].t()  # [text_len, batch_size]
 
         output = model(texts)
         predictions = torch.argmax(output, dim=1) + 1
@@ -157,11 +159,6 @@ def main():
         fields=[('label_id', LABEL), ('text', TEXT)]
     )
     logger.info("Done.")
-
-    # for train_item in train:
-    #     train_item.text = padding(train_item.text[:args.max_len], args.max_len)
-    # for val_item in val:
-    #     val_item.text = padding(val_item.text[:args.max_len], args.max_len)
 
     for train_item in train:
         train_item.text = train_item.text[:args.max_len]
@@ -196,22 +193,21 @@ def main():
     logger.info("Vocab size: %d" % len(TEXT.vocab))
     vocab_size = len(TEXT.vocab)
 
-    train_iter = data.BucketIterator(train, batch_size=args.train_batch_size,
-                                     sort_key=lambda x: len(x.text),
-                                     shuffle=True, device=DEVICE)
-    val_iter = data.BucketIterator(val, batch_size=args.test_batch_size,
-                                   sort_key=lambda x: len(x.text),
-                                   shuffle=True, device=DEVICE)
+    # train_iter = data.BucketIterator(train, batch_size=args.train_batch_size,
+    #                                  sort_key=lambda x: len(x.text),
+    #                                  shuffle=True, device=DEVICE)
+    # val_iter = data.BucketIterator(val, batch_size=args.test_batch_size,
+    #                                sort_key=lambda x: len(x.text),
+    #                                shuffle=True, device=DEVICE)
 
-    # train_loader = DataLoader(TextDataset(
-    #     train, TEXT.vocab, DEVICE), batch_size=args.train_batch_size, shuffle=True
-    # )
-    # val_loader = DataLoader(TextDataset(
-    #     val, TEXT.vocab, DEVICE), batch_size=args.test_batch_size, shuffle=True
-    # )
-    # test_loader = DataLoader(TextDataset(
-    #     test, TEXT.vocab, DEVICE, is_test=True), batch_size=args.test_batch_size, shuffle=True
-    # )
+    train_loader = DataLoader(
+        TextDataset(train, TEXT.vocab, DEVICE),
+        batch_size=args.train_batch_size, shuffle=True
+    )
+    val_loader = DataLoader(
+        TextDataset(val, TEXT.vocab, DEVICE),
+        batch_size=args.test_batch_size, shuffle=True
+    )
 
     if args.model_name in ["LSTM", "RNN", "GRU"]:
         model = RnnModel(logger=logger, num_words=vocab_size,
@@ -255,14 +251,14 @@ def main():
         model.train()
         logger.info("Epoch %d starts!" % epoch)
         loss_avg = AverageMeter()
-        pbar = tqdm(train_iter)
+        pbar = tqdm(train_loader)
         pbar.set_description("Epoch %d - Batch %d - Loss %.3ff"
                              % (epoch, -1, 0))
         total = 0
         correct = 0
         for batch_idx, batch in enumerate(pbar):
-            labels = batch.label_id - 1  # [batch_size]
-            texts = batch.text  # [text_len, batch_size]
+            labels = batch[0]  # [batch_size]
+            texts = batch[1].t()  # [text_len, batch_size]
             optimizer.zero_grad()
 
             out = model(texts)
@@ -273,7 +269,7 @@ def main():
             predictions = torch.argmax(out, dim=1)
             correct_num = torch.sum(predictions == labels).item()
 
-            total += len(batch)
+            total += len(batch[0])
             correct += correct_num
 
             loss_avg.update(loss.item())
@@ -282,7 +278,8 @@ def main():
         sheduler.step()
         logger.info("Training: total %d items; %d are correct. Accuracy: %.3f" %
                     (total, correct, correct / total))
-        curr_val_score, precision, recall, F1 = do_validation(model, val_iter)
+        curr_val_score, precision, recall, F1 = do_validation(
+            model, val_loader)
         logger.info("Epoch %d ends! Average loss: %.3f.\nValidation metrics:\n\t"
                     "Accuracy: %.2f%%\n\tPrecision: %.2f\n\tRecall: %.2f\n\tF1: %.2f" %
                     (epoch, loss_avg.avg, curr_val_score * 100, precision, recall, F1))
@@ -305,7 +302,6 @@ if __name__ == "__main__":
     parser.add_argument("--train_file", default="train.csv")
     parser.add_argument("--dev_file", default="dev.csv")
     parser.add_argument("--test_file", default="test.csv")
-    parser.add_argument("--test_run", type=str)
     parser.add_argument("--output_path", default="runs")
     parser.add_argument("--model_name", required=True,
                         help="Model name for saving.")

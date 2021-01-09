@@ -2,7 +2,7 @@ from numpy.core.fromnumeric import mean
 from numpy.lib.function_base import average
 from torch._C import Value
 from torch.utils.data.dataloader import DataLoader
-from models import RnnModel, TextCNN
+from models import AttentionGRU, RnnModel, TextCNN, TransformerModel
 import torch
 import torch.nn as nn
 import spacy
@@ -79,6 +79,10 @@ def do_validation(model: nn.Module, val_loader: DataLoader):
 
         if args.model_name == "CNN":
             output = model(texts)
+        elif args.model_name == "AttnGRU":
+            output = model(texts, lengths, TEXT.vocab)
+        elif args.model_name == "Transformer":
+            output = model(texts, TEXT.vocab)
         else:
             output = model(texts, lengths)
         predictions = torch.argmax(output, dim=1)
@@ -145,6 +149,10 @@ def predict_test():
 
         if args.model_name == "CNN":
             output = model(texts)
+        elif args.model_name == "AttnGRU":
+            output = model(texts, lengths, TEXT.vocab)
+        elif args.model_name == "Transformer":
+            output = model(texts, TEXT.vocab)
         else:
             output = model(texts, lengths)
         predictions = torch.argmax(output, dim=1) + 1
@@ -164,11 +172,30 @@ def padding(text, max_length):
 
 def main():
     logger.info("Reading data...")
-    train, val = data.TabularDataset.splits(
-        path=args.data_path, train=args.train_file, validation=args.dev_file,
-        format='csv', skip_header=True,
-        fields=[('label_id', LABEL), ('text', TEXT)]
-    )
+    if args.title_only:
+        logger.info("Using title only")
+        train, val = data.TabularDataset.splits(
+            path=args.data_path, train=args.train_file, validation=args.dev_file,
+            format='csv', skip_header=True,
+            fields=[('label_id', LABEL), ('_', None),
+                    ('text', TEXT), ('__', None)]
+        )
+    elif args.description_only:
+        logger.info("Using description only")
+        train, val = data.TabularDataset.splits(
+            path=args.data_path, train=args.train_file, validation=args.dev_file,
+            format='csv', skip_header=True,
+            fields=[('label_id', LABEL), ('_', None),
+                    ('__', None), ('text', TEXT)]
+        )
+    else:
+        logger.info("Using full text.")
+        train, val = data.TabularDataset.splits(
+            path=args.data_path, train=args.train_file, validation=args.dev_file,
+            format='csv', skip_header=True,
+            fields=[('label_id', LABEL), ('text', TEXT),
+                    ('_', None), ('__', None)]
+        )
     logger.info("Done.")
 
     train_lengths = []
@@ -236,6 +263,16 @@ def main():
                         kernel_nums=args.kernel_num, kernel_sizes=args.kernel_size,
                         pretrained_embedding=TEXT.vocab.vectors if args.use_glove else None,
                         input_size=300, num_classes=num_classes)
+    elif args.model_name == "AttnGRU":
+        model = AttentionGRU(logger=logger, num_words=vocab_size,
+                             pretrained_embedding=TEXT.vocab.vectors if args.use_glove else None,
+                             num_layers=args.num_layers, input_size=300, hidden_size=args.hidden_size,
+                             dropout=args.dropout, num_classes=num_classes)
+    elif args.model_name == "Transformer":
+        model = TransformerModel(logger=logger, num_words=vocab_size,
+                                 pretrained_embedding=TEXT.vocab.vectors if args.use_glove else None,
+                                 num_layers=args.num_layers, nhead=8, max_length=args.max_len, d_model=512,
+                                 dropout=args.dropout, num_classes=num_classes)
     else:
         raise ValueError("Unsupported model.")
     if args.gpu:
@@ -279,6 +316,10 @@ def main():
 
             if args.model_name == "CNN":
                 out = model(texts)
+            elif args.model_name == "AttnGRU":
+                out = model(texts, lengths, TEXT.vocab)
+            elif args.model_name == "Transformer":
+                out = model(texts, TEXT.vocab)
             else:
                 out = model(texts, lengths)
             loss = criterion(out, labels)
@@ -346,9 +387,14 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", type=str, default="Adam")
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--use_glove", action="store_true")
+    parser.add_argument("--nhead", type=int, default=8)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--title_only", action="store_true")
+    group.add_argument("--description_only", action="store_true")
     args = parser.parse_args()
     process_args(args)
-    assert args.model_name in ["LSTM", "RNN", "GRU", "CNN"]
+    assert args.model_name in ["LSTM", "RNN",
+                               "GRU", "CNN", "AttnGRU", "Transformer"]
     assert len(args.kernel_num) == len(args.kernel_size)
     assert args.optimizer in ["SGD", "Adam", "AdamW"]
     assert args.tokenizer in ["spacy", "nltk"]

@@ -326,7 +326,7 @@ if __name__ == "__main__":
                         help="Model name for saving.")
     parser.add_argument("--train_batch_size", type=int, default=128)
     parser.add_argument("--test_batch_size", type=int, default=256)
-    parser.add_argument("--epoch_num", type=int, default=10)
+    parser.add_argument("--epoch_num", type=int, default=5)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--hidden_size", type=int, default=512)
     parser.add_argument("--dropout", type=float, default=0)

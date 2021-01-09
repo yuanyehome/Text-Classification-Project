@@ -17,6 +17,13 @@ $ python
 ```
 
 ## How to run
+Preprocess
+```bash
+mkdir data
+cp <data-folder>/* data
+python gen_merged_data.py
+```
+
 Train:
 ```bash
 python -W ignore run.py --model_name CNN --max_len 200 --optimizer AdamW --use_glove
